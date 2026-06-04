@@ -91,6 +91,18 @@ pub struct ShortlogArgs {
     #[clap(short = 'e', long = "email")]
     pub email: bool,
 
+    /// Limit output to the top N authors after sorting
+    #[arg(long)]
+    pub top: Option<usize>,
+
+    /// Only show authors with at least N commits
+    #[arg(long)]
+    pub min_count: Option<usize>,
+
+    /// Reverse the sort order
+    #[arg(long)]
+    pub reverse: bool,
+
     /// Show commits more recent than DATE (RFC3339, `YYYY-MM-DD`, or relative like `24h` / `7d`)
     #[clap(long = "since", value_name = "DATE")]
     pub since: Option<String>,
@@ -248,6 +260,29 @@ fn aggregate_shortlog(args: &ShortlogArgs, revision: &str, commits: Vec<Commit>)
     } else {
         authors.sort_by_key(|stats| stats.name.to_lowercase());
     }
+
+    // ========== 新增：--min-count, --reverse, --top 处理 ==========
+    // 1. 按 min_count 过滤
+    if let Some(min) = args.min_count {
+        authors.retain(|stats| stats.count >= min);
+    }
+
+    // 2. 反向排序（如果 --reverse 且不是 --numbered，则完全反转）
+    if args.reverse {
+        if args.numbered {
+            // 如果已经按提交数排序了，直接反转就变成升序
+            authors.reverse();
+        } else {
+            // 否则按提交数升序排序
+            authors.sort_by_key(|stats| stats.count);
+        }
+    }
+
+    // 3. 按 top 截取
+    if let Some(limit) = args.top {
+        authors.truncate(limit);
+    }
+    // ====================================================
 
     ShortlogOutput {
         revision: revision.to_string(),

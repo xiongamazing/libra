@@ -724,3 +724,99 @@ async fn test_shortlog_committer_date_filter() {
     assert!(output.contains("TEST"));
     assert!(output.contains("Test Commit"));
 }
+
+#[tokio::test]
+#[serial]
+async fn test_shortlog_top_min_count_reverse() {
+    let temp_path = tempdir().unwrap();
+    test::setup_with_new_libra_in(temp_path.path()).await;
+    let _guard = ChangeDirGuard::new(temp_path.path());
+    let _ = create_test_commit_tree().await;
+
+    // 测试 --top 3：只显示前 3 个作者
+    let args = ShortlogArgs::try_parse_from(["libra", "--top", "3"]).unwrap();
+    let mut buf = Vec::new();
+    shortlog::execute_to(args, &mut buf).await.unwrap();
+    let output = String::from_utf8(buf).unwrap();
+    let lines: Vec<&str> = output
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    // 应该有 3 个作者（LEAVE 5, SHY 2, SunZo 2），每个作者可能有多行（提交信息）
+    // 计算以数字开头的行（作者行）
+    let author_lines: Vec<&str> = lines
+        .iter()
+        .filter(|line| {
+            line.trim()
+                .chars()
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false)
+        })
+        .copied()
+        .collect();
+    assert_eq!(
+        author_lines.len(),
+        3,
+        "--top 3 should show exactly 3 authors"
+    );
+
+    // 测试 --min-count 3：只显示提交数 >= 3 的作者（只有 LEAVE 有 5 个）
+    let args = ShortlogArgs::try_parse_from(["libra", "--min-count", "3"]).unwrap();
+    let mut buf = Vec::new();
+    shortlog::execute_to(args, &mut buf).await.unwrap();
+    let output = String::from_utf8(buf).unwrap();
+    assert!(output.contains("LEAVE"), "LEAVE should appear (5 commits)");
+    assert!(
+        !output.contains("SHY"),
+        "SHY should not appear (2 commits < 3)"
+    );
+    assert!(
+        !output.contains("SunZo"),
+        "SunZo should not appear (2 commits < 3)"
+    );
+    assert!(
+        !output.contains("GUXUE"),
+        "GUXUE should not appear (1 commit < 3)"
+    );
+
+    // 测试 --reverse：反向排序（从少到多）
+    let args = ShortlogArgs::try_parse_from(["libra", "-n", "--reverse"]).unwrap();
+    let mut buf = Vec::new();
+    shortlog::execute_to(args, &mut buf).await.unwrap();
+    let output = String::from_utf8(buf).unwrap();
+    let lines: Vec<&str> = output.lines().collect();
+    // 第一行应该是提交数最少的（1 个）
+    assert!(
+        lines[0].contains("GUXUE") || lines[0].contains("LENGSA") || lines[0].contains("MMONK"),
+        "First line should have 1 commit"
+    );
+
+    // 测试组合：--top 2 --min-count 2 --reverse
+    let args =
+        ShortlogArgs::try_parse_from(["libra", "--top", "2", "--min-count", "2", "--reverse"])
+            .unwrap();
+    let mut buf = Vec::new();
+    shortlog::execute_to(args, &mut buf).await.unwrap();
+    let output = String::from_utf8(buf).unwrap();
+    let lines: Vec<&str> = output
+        .lines()
+        .filter(|line| {
+            line.trim()
+                .chars()
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false)
+        })
+        .collect();
+    assert_eq!(lines.len(), 2, "Should show exactly 2 authors");
+    // 排序后应该是 SHY(2) 和 SunZo(2)
+    assert!(
+        lines[0].contains("SHY") || lines[0].contains("SunZo"),
+        "First should have 2 commits"
+    );
+    assert!(
+        lines[1].contains("SunZo") || lines[1].contains("SHY"),
+        "Second should have 2 commits"
+    );
+}
