@@ -360,3 +360,282 @@ pub struct MetaObject {
     pub exist: bool,
     pub splited: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── TransferMode serde ───────────────────────────────────────────
+
+    #[test]
+    fn transfer_mode_default_is_basic() {
+        let mode = TransferMode::default();
+        let json = serde_json::to_string(&mode).unwrap();
+        assert_eq!(json, "\"basic\"");
+    }
+
+    #[test]
+    fn transfer_mode_roundtrip_basic() {
+        let json = "\"basic\"";
+        let mode: TransferMode = serde_json::from_str(json).unwrap();
+        assert!(matches!(mode, TransferMode::BASIC));
+    }
+
+    #[test]
+    fn transfer_mode_roundtrip_multipart() {
+        let json = "\"multipart\"";
+        let mode: TransferMode = serde_json::from_str(json).unwrap();
+        assert!(matches!(mode, TransferMode::MULTIPART));
+    }
+
+    // ── Operation serde ──────────────────────────────────────────────
+
+    #[test]
+    fn operation_roundtrip() {
+        let dl = serde_json::to_string(&Operation::Download).unwrap();
+        assert_eq!(dl, "\"download\"");
+        let ul = serde_json::to_string(&Operation::Upload).unwrap();
+        assert_eq!(ul, "\"upload\"");
+
+        let parsed: Operation = serde_json::from_str("\"download\"").unwrap();
+        assert_eq!(parsed, Operation::Download);
+    }
+
+    // ── Action serde ─────────────────────────────────────────────────
+
+    #[test]
+    fn action_serde_all_variants() {
+        for (variant, expected) in [
+            (Action::Download, "\"download\""),
+            (Action::Upload, "\"upload\""),
+            (Action::Verify, "\"verify\""),
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            assert_eq!(json, expected);
+        }
+    }
+
+    // ── RequestObject defaults ───────────────────────────────────────
+
+    #[test]
+    fn request_object_default_has_empty_optional_fields() {
+        let obj = RequestObject::default();
+        assert!(obj.oid.is_empty());
+        assert_eq!(obj.size, 0);
+        assert!(obj.user.is_empty());
+        assert!(obj.password.is_empty());
+        assert!(obj.repo.is_empty());
+        assert!(obj.authorization.is_empty());
+    }
+
+    #[test]
+    fn request_object_skips_empty_fields_in_json() {
+        let obj = RequestObject {
+            oid: "abc123".to_string(),
+            size: 42,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&obj).unwrap();
+        assert!(json.contains("\"oid\":\"abc123\""));
+        assert!(json.contains("\"size\":42"));
+        // Empty fields should be skipped by skip_serializing_if
+        assert!(!json.contains("\"user\""));
+        assert!(!json.contains("\"password\""));
+    }
+
+    // ── Link::new ────────────────────────────────────────────────────
+
+    #[test]
+    fn link_new_sets_accept_header() {
+        let link = Link::new("https://example.com/lfs/obj");
+        assert_eq!(link.href, "https://example.com/lfs/obj");
+        assert_eq!(
+            link.header.get("Accept").map(String::as_str),
+            Some("application/vnd.git-lfs"),
+        );
+    }
+
+    #[test]
+    fn link_new_sets_rfc3339_expiry() {
+        let link = Link::new("https://example.com");
+        // The expires_at should be a valid RFC 3339 timestamp
+        assert!(
+            chrono::DateTime::parse_from_rfc3339(&link.expires_at).is_ok(),
+            "expires_at should be valid RFC 3339: {}",
+            link.expires_at,
+        );
+    }
+
+    // ── ResponseObject::new — all four (file_exist, operation) combos ──
+
+    fn sample_meta(exist: bool) -> MetaObject {
+        MetaObject {
+            oid: "deadbeef".to_string(),
+            size: 1024,
+            exist,
+            splited: false,
+        }
+    }
+
+    #[test]
+    fn response_object_existing_upload_omits_actions() {
+        let meta = sample_meta(true);
+        let res = ResponseObject::new(
+            &meta,
+            ResCondition {
+                file_exist: true,
+                operation: Operation::Upload,
+                use_tus: false,
+            },
+            "",
+            "",
+        );
+        assert_eq!(res.oid, "deadbeef");
+        assert_eq!(res.size, 1024);
+        assert!(res.actions.is_none());
+        assert!(res.error.is_none());
+    }
+
+    #[test]
+    fn response_object_existing_download_has_download_action() {
+        let meta = sample_meta(true);
+        let res = ResponseObject::new(
+            &meta,
+            ResCondition {
+                file_exist: true,
+                operation: Operation::Download,
+                use_tus: false,
+            },
+            "https://dl.example.com/obj",
+            "",
+        );
+        let actions = res.actions.as_ref().expect("download action required");
+        assert!(actions.contains_key(&Action::Download));
+        assert_eq!(
+            actions[&Action::Download].href,
+            "https://dl.example.com/obj"
+        );
+    }
+
+    #[test]
+    fn response_object_missing_upload_has_upload_action() {
+        let meta = sample_meta(false);
+        let res = ResponseObject::new(
+            &meta,
+            ResCondition {
+                file_exist: false,
+                operation: Operation::Upload,
+                use_tus: false,
+            },
+            "",
+            "https://ul.example.com/obj",
+        );
+        let actions = res.actions.as_ref().expect("upload action required");
+        assert!(actions.contains_key(&Action::Upload));
+        assert_eq!(actions[&Action::Upload].href, "https://ul.example.com/obj");
+    }
+
+    #[test]
+    fn response_object_missing_download_has_404_error() {
+        let meta = sample_meta(false);
+        let res = ResponseObject::new(
+            &meta,
+            ResCondition {
+                file_exist: false,
+                operation: Operation::Download,
+                use_tus: false,
+            },
+            "",
+            "",
+        );
+        assert!(res.actions.is_none());
+        let err = res
+            .error
+            .as_ref()
+            .expect("error expected for missing download");
+        assert_eq!(err.code, 404);
+    }
+
+    // ── ResponseObject::failed_with_err ──────────────────────────────
+
+    #[test]
+    fn failed_with_err_carries_error_and_echoes_oid() {
+        let req = RequestObject {
+            oid: "badf00d".to_string(),
+            size: 999,
+            ..Default::default()
+        };
+        let err = ObjectError {
+            code: 500,
+            message: "storage unreachable".to_string(),
+        };
+        let res = ResponseObject::failed_with_err(&req, err);
+        assert_eq!(res.oid, "badf00d");
+        assert_eq!(res.size, 999);
+        assert!(res.authenticated.is_none());
+        assert!(res.actions.is_none());
+        let e = res.error.expect("error must be set");
+        assert_eq!(e.code, 500);
+        assert_eq!(e.message, "storage unreachable");
+    }
+
+    // ── BatchRequest serde ───────────────────────────────────────────
+
+    #[test]
+    fn batch_request_roundtrip() {
+        let req = BatchRequest {
+            operation: Operation::Download,
+            transfers: vec!["basic".to_string()],
+            objects: vec![RequestObject {
+                oid: "aabbcc".to_string(),
+                size: 100,
+                ..Default::default()
+            }],
+            hash_algo: "sha256".to_string(),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: BatchRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.operation, Operation::Download);
+        assert_eq!(parsed.objects.len(), 1);
+        assert_eq!(parsed.objects[0].oid, "aabbcc");
+        assert_eq!(parsed.hash_algo, "sha256");
+    }
+
+    // ── Lock / LockRequest serde ─────────────────────────────────────
+
+    #[test]
+    fn lock_request_uses_ref_rename() {
+        let req = LockRequest {
+            path: "path/to/file".to_string(),
+            refs: Ref {
+                name: "refs/heads/main".to_string(),
+            },
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(
+            json.contains("\"ref\""),
+            "refs field should serialize as 'ref'"
+        );
+        assert!(!json.contains("\"refs\""));
+    }
+
+    #[test]
+    fn lock_list_default_is_empty() {
+        let ll = LockList::default();
+        assert!(ll.locks.is_empty());
+        assert!(ll.next_cursor.is_empty());
+    }
+
+    // ── LockListQuery defaults ───────────────────────────────────────
+
+    #[test]
+    fn lock_list_query_deserializes_with_defaults() {
+        let json = "{}";
+        let q: LockListQuery = serde_json::from_str(json).unwrap();
+        assert!(q.path.is_empty());
+        assert!(q.id.is_empty());
+        assert!(q.cursor.is_empty());
+        assert!(q.limit.is_empty());
+        assert!(q.refspec.is_empty());
+    }
+}

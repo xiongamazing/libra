@@ -66,3 +66,63 @@ pub fn write_git_object(
 
     Ok(hash)
 }
+
+#[cfg(test)]
+mod tests {
+    use tempfile::tempdir;
+
+    use super::*;
+
+    #[test]
+    fn write_and_read_blob_roundtrip() {
+        let dir = tempdir().expect("create tempdir");
+        let data = b"hello, libra";
+        let hash = write_git_object(dir.path(), "blob", data).expect("write blob");
+
+        let content = read_git_object(dir.path(), &hash).expect("read blob");
+        assert_eq!(content, data);
+    }
+
+    #[test]
+    fn write_idempotent_same_content() {
+        let dir = tempdir().expect("create tempdir");
+        let data = b"same content";
+        let h1 = write_git_object(dir.path(), "blob", data).expect("first write");
+        let h2 = write_git_object(dir.path(), "blob", data).expect("second write");
+        assert_eq!(h1, h2, "same content should produce the same hash");
+    }
+
+    #[test]
+    fn write_different_types_produces_different_hashes() {
+        let dir = tempdir().expect("create tempdir");
+        let data = b"payload";
+        let h_blob = write_git_object(dir.path(), "blob", data).expect("write blob");
+        let h_commit = write_git_object(dir.path(), "commit", data).expect("write commit");
+        assert_ne!(h_blob, h_commit, "different object types should differ");
+    }
+
+    #[test]
+    fn read_nonexistent_object_returns_error() {
+        let dir = tempdir().expect("create tempdir");
+        let fake_hash = ObjectHash::new(b"nonexistent");
+        assert!(read_git_object(dir.path(), &fake_hash).is_err());
+    }
+
+    #[test]
+    fn write_empty_blob() {
+        let dir = tempdir().expect("create tempdir");
+        let hash = write_git_object(dir.path(), "blob", b"").expect("write empty blob");
+        let content = read_git_object(dir.path(), &hash).expect("read empty blob");
+        assert!(content.is_empty());
+    }
+
+    #[test]
+    fn write_large_blob() {
+        let dir = tempdir().expect("create tempdir");
+        let data = vec![0xABu8; 64 * 1024]; // 64 KiB
+        let hash = write_git_object(dir.path(), "blob", &data).expect("write large blob");
+        let content = read_git_object(dir.path(), &hash).expect("read large blob");
+        assert_eq!(content.len(), 64 * 1024);
+        assert_eq!(content, data);
+    }
+}
