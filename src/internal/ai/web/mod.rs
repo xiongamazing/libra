@@ -414,8 +414,15 @@ async fn code_ui_broadcast_event_or_recovery(
 ) -> Option<code_ui::CodeUiEventEnvelope> {
     match message {
         Ok(event) => Some(event),
-        Err(BroadcastStreamRecvError::Lagged(_)) => {
-            ensure_session_updated_event(&runtime.snapshot().await).ok()
+        Err(BroadcastStreamRecvError::Lagged(skipped)) => {
+            tracing::warn!(skipped, "SSE broadcast lagged; sending recovery snapshot");
+            match ensure_session_updated_event(&runtime.snapshot().await) {
+                Ok(event) => Some(event),
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to build recovery snapshot after lag");
+                    None
+                }
+            }
         }
     }
 }

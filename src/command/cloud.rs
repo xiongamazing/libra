@@ -905,7 +905,11 @@ pub(crate) async fn run_cloud_sync(
         .if_not_exists()
         .to_owned();
 
-    let _ = db_conn.execute(builder.build(&stmt)).await;
+    if let Err(e) = db_conn.execute(builder.build(&stmt)).await {
+        return Err(CloudError::Generic(format!(
+            "failed to create object_index table: {e}"
+        )));
+    }
 
     let repo_id = ensure_repo_id().await;
 
@@ -1245,7 +1249,9 @@ async fn run_cloud_restore(args: RestoreArgs) -> CloudResult<CloudRestoreOutput>
         }
     }
 
-    let _ = ConfigKv::set("libra.repoid", &repo_id, false).await;
+    if let Err(e) = ConfigKv::set("libra.repoid", &repo_id, false).await {
+        emit_warning(format!("failed to persist repo ID to config: {e}"));
+    }
 
     if args.metadata_only {
         return Ok(CloudRestoreOutput {
@@ -1319,7 +1325,9 @@ async fn run_cloud_restore(args: RestoreArgs) -> CloudResult<CloudRestoreOutput>
         .await
         .map_err(|error| CloudError::Generic(format!("failed to resolve HEAD commit: {error}")))?;
     if head_commit.is_some() {
-        let _ = restore_worktree_to_head(false).await;
+        if let Err(e) = restore_worktree_to_head(false).await {
+            emit_warning(format!("worktree restore from HEAD failed: {e}"));
+        }
     } else {
         let main_branch = Branch::find_branch_result("main", None)
             .await
@@ -1328,7 +1336,9 @@ async fn run_cloud_restore(args: RestoreArgs) -> CloudResult<CloudRestoreOutput>
             })?;
         if main_branch.is_some() {
             Head::update(Head::Branch("main".to_string()), None).await;
-            let _ = restore_worktree_to_head(false).await;
+            if let Err(e) = restore_worktree_to_head(false).await {
+                emit_warning(format!("worktree restore from main branch failed: {e}"));
+            }
         }
     }
 
@@ -1443,7 +1453,9 @@ async fn execute_restore(args: RestoreArgs) -> CloudResult<()> {
     );
 
     // Update local config with restored repo_id
-    let _ = ConfigKv::set("libra.repoid", &repo_id, false).await;
+    if let Err(e) = ConfigKv::set("libra.repoid", &repo_id, false).await {
+        emit_warning(format!("failed to persist repo ID to config: {e}"));
+    }
 
     if args.metadata_only {
         println!("Metadata-only restore complete.");
@@ -1491,7 +1503,9 @@ async fn execute_restore(args: RestoreArgs) -> CloudResult<()> {
 
         if let Some(commit) = head_commit {
             println!("Restoring working directory to HEAD ({})", commit);
-            let _ = restore_worktree_to_head(true).await;
+            if let Err(e) = restore_worktree_to_head(true).await {
+                emit_warning(format!("worktree restore from HEAD failed: {e}"));
+            }
         } else {
             println!("Restoring working directory (fallback)...");
 
@@ -1509,7 +1523,9 @@ async fn execute_restore(args: RestoreArgs) -> CloudResult<()> {
                 // Update HEAD to point to main
                 Head::update(Head::Branch("main".to_string()), None).await;
 
-                let _ = restore_worktree_to_head(true).await;
+                if let Err(e) = restore_worktree_to_head(true).await {
+                    emit_warning(format!("worktree restore from main branch failed: {e}"));
+                }
             } else {
                 println!("No HEAD commit or main branch found. Skipping worktree restore.");
             }
@@ -1819,14 +1835,19 @@ async fn ensure_repo_id() -> String {
     }
 
     let repo_id = Uuid::new_v4().to_string();
-    let _ = ConfigKv::set("libra.repoid", &repo_id, false).await;
+    if let Err(e) = ConfigKv::set("libra.repoid", &repo_id, false).await {
+        tracing::warn!(error = %e, "failed to persist new repo ID to config");
+    }
 
     let db_conn = db::get_db_conn_instance().await;
-    let _ = object_index::Entity::update_many()
+    if let Err(e) = object_index::Entity::update_many()
         .filter(object_index::Column::RepoId.eq("unknown-repo"))
         .col_expr(object_index::Column::RepoId, Expr::value(repo_id.clone()))
         .exec(&db_conn)
-        .await;
+        .await
+    {
+        tracing::warn!(error = %e, "failed to migrate unknown-repo object indexes to new repo ID");
+    }
 
     repo_id
 }
@@ -1882,7 +1903,9 @@ async fn sync_metadata(
         .map_err(|e| CloudError::R2(format!("Failed to upload metadata: {}", e)))?;
 
     // Update stored hash.
-    let _ = ConfigKv::set("cloud.metadata_hash", &current_hash.to_string(), false).await;
+    if let Err(e) = ConfigKv::set("cloud.metadata_hash", &current_hash.to_string(), false).await {
+        tracing::warn!(error = %e, "failed to persist metadata hash to config");
+    }
 
     progress.on_metadata_synced(sorted_refs.len());
     Ok(MetadataSyncOutcome::Synced {

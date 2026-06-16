@@ -716,7 +716,9 @@ pub async fn store_credentials(unseal_key: &[u8], encrypted_token: &[u8]) -> Res
         .context("failed to store vault unseal key in ~/.libra/")?;
 
     // Clean up any legacy insecure storage if present.
-    let _ = ConfigKv::unset_all("vault.unsealkey").await;
+    if let Err(e) = ConfigKv::unset_all("vault.unsealkey").await {
+        tracing::warn!(error = %e, "failed to clean up legacy vault.unsealkey config entry");
+    }
 
     // Encrypted token always goes in repo config
     ConfigKv::set("vault.roottoken_enc", &hex::encode(encrypted_token), false)
@@ -733,10 +735,16 @@ pub async fn store_credentials(unseal_key: &[u8], encrypted_token: &[u8]) -> Res
 pub async fn remove_credentials() {
     use crate::internal::config::ConfigKv;
     // Remove from home dir
-    let _ = remove_unseal_key_from_home().await;
+    if let Err(e) = remove_unseal_key_from_home().await {
+        tracing::warn!(error = %e, "failed to remove unseal key from home directory");
+    }
     // Remove legacy repo-config entries
-    let _ = ConfigKv::unset_all("vault.unsealkey").await;
-    let _ = ConfigKv::unset_all("vault.roottoken_enc").await;
+    if let Err(e) = ConfigKv::unset_all("vault.unsealkey").await {
+        tracing::warn!(error = %e, "failed to remove vault.unsealkey from config");
+    }
+    if let Err(e) = ConfigKv::unset_all("vault.roottoken_enc").await {
+        tracing::warn!(error = %e, "failed to remove vault.roottoken_enc from config");
+    }
 }
 
 // ── Internal helpers ──
@@ -890,8 +898,9 @@ async fn create_vault(root_dir: &Path) -> Result<RustyVault> {
 
 async fn upsert_config_value(dotted_key: &str, value: &str) {
     use crate::internal::config::ConfigKv;
-    // set does upsert for single-value keys; ignore errors for vault internals
-    let _ = ConfigKv::set(dotted_key, value, false).await;
+    if let Err(e) = ConfigKv::set(dotted_key, value, false).await {
+        tracing::warn!(key = dotted_key, error = %e, "failed to upsert vault config value");
+    }
 }
 
 /// Recover the root token by decrypting the stored encrypted token with the unseal key.
