@@ -17,6 +17,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use subtle::ConstantTimeEq;
 use tokio::sync::{Mutex, RwLock, broadcast};
 use uuid::Uuid;
 
@@ -1282,7 +1283,7 @@ impl CodeUiRuntimeHandle {
                     "No client currently controls this session",
                 ));
             };
-            if lease.token != token {
+            if lease.token.as_bytes().ct_ne(token.as_bytes()).into() {
                 return Err(CodeUiApiError::forbidden(
                     "INVALID_CONTROLLER_TOKEN",
                     "The controller token does not match the active controller",
