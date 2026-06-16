@@ -1,5 +1,7 @@
 //! Shared text helpers for safe abbreviated display and fuzzy matching.
 
+use git_internal::hash::ObjectHash;
+
 /// Default short hash width used in human-readable confirmations.
 pub const SHORT_HASH_LEN: usize = 7;
 
@@ -16,6 +18,12 @@ pub fn short_display_hash(hash: &str) -> &str {
         .unwrap_or(hash.len());
 
     hash.get(..byte_idx).unwrap_or(hash)
+}
+
+/// Shortened display form of an [`ObjectHash`], returning the first
+/// [`SHORT_HASH_LEN`] hex characters as an owned `String`.
+pub fn short_object_id(hash: &ObjectHash) -> String {
+    short_display_hash(&hash.to_string()).to_string()
 }
 
 /// Compute the Levenshtein edit distance between two strings.
@@ -42,7 +50,9 @@ pub fn levenshtein(a: &str, b: &str) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{levenshtein, short_display_hash};
+    use git_internal::hash::ObjectHash;
+
+    use super::{SHORT_HASH_LEN, levenshtein, short_display_hash, short_object_id};
 
     #[test]
     fn short_display_hash_keeps_ascii_prefix() {
@@ -69,6 +79,14 @@ mod tests {
         assert_eq!(short_display_hash("12345678"), "1234567");
         // UTF-8: exactly 7 multibyte chars → unchanged.
         assert_eq!(short_display_hash("ßßßßßßß"), "ßßßßßßß");
+    }
+
+    #[test]
+    fn short_object_id_returns_seven_char_prefix() {
+        let hash = ObjectHash::new(&[0xab; 20]);
+        let short = short_object_id(&hash);
+        assert_eq!(short.len(), SHORT_HASH_LEN);
+        assert!(hash.to_string().starts_with(&short));
     }
 
     #[test]

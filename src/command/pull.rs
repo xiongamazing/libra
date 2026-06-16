@@ -15,6 +15,7 @@ use crate::{
     utils::{
         error::{CliError, CliResult, StableErrorCode},
         output::{OutputConfig, ProgressMode, emit_json_data},
+        text::short_display_hash,
     },
 };
 
@@ -389,12 +390,12 @@ fn render_pull_output(result: &PullOutput, output: &OutputConfig) -> CliResult<(
             .remote_ref
             .strip_prefix("refs/remotes/")
             .unwrap_or(&update.remote_ref);
-        let new_short = short_oid(&update.new_oid);
+        let new_short = short_display_hash(&update.new_oid);
         if let Some(old_oid) = &update.old_oid {
             writeln!(
                 writer,
                 "   {}..{}  {}",
-                short_oid(old_oid),
+                short_display_hash(old_oid),
                 new_short,
                 ref_name
             )
@@ -421,8 +422,13 @@ fn render_pull_output(result: &PullOutput, output: &OutputConfig) -> CliResult<(
     }
 
     if let (Some(old), Some(new)) = (&merge.old_commit, &merge.commit) {
-        writeln!(writer, "Updating {}..{}", short_oid(old), short_oid(new))
-            .map_err(|error| CliError::io(format!("failed to write pull summary: {error}")))?;
+        writeln!(
+            writer,
+            "Updating {}..{}",
+            short_display_hash(old),
+            short_display_hash(new)
+        )
+        .map_err(|error| CliError::io(format!("failed to write pull summary: {error}")))?;
     }
     match merge.strategy.as_str() {
         "three-way" => writeln!(writer, "Merge made by the 'three-way' strategy."),
@@ -468,8 +474,8 @@ fn render_pull_rebase_summary<W: Write>(
             writeln!(
                 writer,
                 "Fast-forwarded onto '{upstream}' ({}..{}).",
-                short_oid(&rebase.old_commit),
-                short_oid(&rebase.commit),
+                short_display_hash(&rebase.old_commit),
+                short_display_hash(&rebase.commit),
             )
             .map_err(map_io_err)?;
         }
@@ -484,18 +490,14 @@ fn render_pull_rebase_summary<W: Write>(
                 "Successfully rebased {count} {noun} onto '{upstream}' ({old}..{new}).",
                 count = rebase.replay_count,
                 noun = commits_noun,
-                old = short_oid(&rebase.old_commit),
-                new = short_oid(&rebase.commit),
+                old = short_display_hash(&rebase.old_commit),
+                new = short_display_hash(&rebase.commit),
                 upstream = upstream,
             )
             .map_err(map_io_err)?;
         }
     }
     Ok(())
-}
-
-fn short_oid(oid: &str) -> &str {
-    oid.get(..7).unwrap_or(oid)
 }
 
 fn normalize_remote_branch_name(branch: &str) -> String {

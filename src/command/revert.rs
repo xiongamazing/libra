@@ -21,7 +21,7 @@ use serde::Serialize;
 
 use crate::{
     command::{load_object, save_object},
-    common_utils::format_commit_msg,
+    common_utils::{commit_subject, format_commit_msg},
     internal::{branch::Branch, head::Head},
     utils::{
         error::{CliError, CliResult, StableErrorCode},
@@ -167,7 +167,7 @@ async fn run_revert(args: RevertArgs) -> Result<RevertOutput, RevertError> {
         return Err(RevertError::DetachedHead);
     }
 
-    let commit_id = resolve_commit(&args.commit)
+    let commit_id = util::get_commit_base(&args.commit)
         .await
         .map_err(|_| RevertError::InvalidCommit(args.commit.clone()))?;
 
@@ -480,7 +480,7 @@ async fn create_revert_commit(
 
     let revert_message = format!(
         "Revert \"{}\"\n\nThis reverts commit {}.",
-        reverted_commit.message.lines().next().unwrap_or(""),
+        commit_subject(&reverted_commit.message),
         reverted_commit_id
     );
 
@@ -510,10 +510,6 @@ async fn create_empty_revert_commit(parent_id: &ObjectHash) -> Result<ObjectHash
     save_object(&commit, &commit.id).map_err(|e| RevertError::SaveObject(e.to_string()))?;
     update_head(&commit.id.to_string()).await?;
     Ok(commit.id)
-}
-
-async fn resolve_commit(reference: &str) -> Result<ObjectHash, String> {
-    util::get_commit_base(reference).await
 }
 
 async fn update_head(commit_id: &str) -> Result<(), RevertError> {

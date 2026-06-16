@@ -191,7 +191,7 @@ async fn run_cherry_pick(args: CherryPickArgs) -> Result<CherryPickOutput, Cherr
 
     let mut commit_ids = Vec::new();
     for commit_ref in &args.commits {
-        let id = resolve_commit(commit_ref)
+        let id = util::get_commit_base(commit_ref)
             .await
             .map_err(|_| CherryPickError::InvalidCommit(commit_ref.clone()))?;
         commit_ids.push(id);
@@ -550,10 +550,6 @@ fn file_name_to_utf8(path: &Path) -> Result<String, CherryPickSingleError> {
                 path.display()
             ))
         })
-}
-
-async fn resolve_commit(reference: &str) -> Result<ObjectHash, String> {
-    util::get_commit_base(reference).await
 }
 
 async fn update_head<C: ConnectionTrait>(db: &C, commit_id: &str) -> Result<(), sea_orm::DbErr> {

@@ -35,6 +35,7 @@ use crate::{
             restore_working_directory_from_tree,
         },
     },
+    common_utils::commit_subject,
     internal::{
         branch::{Branch as InternalBranch, BranchStoreError},
         head::Head,
@@ -44,6 +45,7 @@ use crate::{
         object,
         object_ext::TreeExt,
         output::{OutputConfig, emit_json_data},
+        text::short_display_hash,
         tree, util,
     },
 };
@@ -301,29 +303,20 @@ async fn run_push(message: Option<String>) -> Result<StashOutput, StashError> {
     let index_tree_hash = index_tree.id;
 
     let (author, committer) = util::create_signatures().await;
-    let (current_branch_name, head_commit_summary) = match Head::current().await {
-        Head::Branch(name) => {
-            let data = object::read_git_object(&git_dir, &head_commit_hash)
-                .map_err(|e| StashError::ReadObject(e.to_string()))?;
-            let c = Commit::from_bytes(&data, head_commit_hash)
-                .map_err(|e| StashError::ReadObject(e.to_string()))?;
-            let summary = c.message.lines().next().unwrap_or("").to_string();
-            (name, summary)
-        }
-        Head::Detached(_) => {
-            let data = object::read_git_object(&git_dir, &head_commit_hash)
-                .map_err(|e| StashError::ReadObject(e.to_string()))?;
-            let c = Commit::from_bytes(&data, head_commit_hash)
-                .map_err(|e| StashError::ReadObject(e.to_string()))?;
-            let summary = c.message.lines().next().unwrap_or("").to_string();
-            ("(no branch)".to_string(), summary)
-        }
+    let current_branch_name = match Head::current().await {
+        Head::Branch(name) => name,
+        Head::Detached(_) => "(no branch)".to_string(),
     };
+    let head_commit_data = object::read_git_object(&git_dir, &head_commit_hash)
+        .map_err(|e| StashError::ReadObject(e.to_string()))?;
+    let head_commit_obj = Commit::from_bytes(&head_commit_data, head_commit_hash)
+        .map_err(|e| StashError::ReadObject(e.to_string()))?;
+    let head_commit_summary = commit_subject(&head_commit_obj.message);
 
     let wip_message = format!(
         "WIP on {}: {} {}",
         current_branch_name,
-        &head_commit_hash_str[..7],
+        short_display_hash(&head_commit_hash_str),
         head_commit_summary
     );
     let final_message = message.unwrap_or(wip_message);

@@ -25,7 +25,7 @@ use crate::{
         error::{CliError, CliResult, StableErrorCode},
         output::{OutputConfig, emit_json_data},
         path,
-        text::levenshtein,
+        text::{levenshtein, short_display_hash, short_object_id},
         util,
         util::get_commit_base,
         worktree,
@@ -735,12 +735,12 @@ async fn switch_to_commit(
 
     let from_ref_name = match Head::current_with_conn(&db).await {
         Head::Branch(name) => name,
-        Head::Detached(hash) => hash.to_string()[..7].to_string(), // Use short hash for detached HEAD
+        Head::Detached(hash) => short_object_id(&hash),
     };
 
     let action = ReflogAction::Switch {
         from: from_ref_name,
-        to: commit_hash.to_string()[..7].to_string(), // Use short hash for target commit
+        to: short_object_id(&commit_hash),
     };
     let context = ReflogContext {
         old_oid,
@@ -787,7 +787,7 @@ async fn switch_to_resolved_branch(
 
     let from_ref_name = match Head::current_with_conn(&db).await {
         Head::Branch(name) => name,
-        Head::Detached(hash) => hash.to_string()[..7].to_string(),
+        Head::Detached(hash) => short_object_id(&hash),
     };
 
     if from_ref_name == branch_name {
@@ -856,7 +856,7 @@ fn render_switch_output(result: &SwitchOutput, output: &OutputConfig) -> CliResu
             println!("Already on '{}'", branch);
         }
     } else if result.detached {
-        println!("HEAD is now at {}", &result.commit[..7]);
+        println!("HEAD is now at {}", short_display_hash(&result.commit));
     } else if result.created {
         println!(
             "Switched to a new branch '{}'",

@@ -20,7 +20,7 @@ use crate::{
         load_object,
         log::{ChangeType, generate_diff, get_changed_files_for_commit},
     },
-    common_utils::parse_commit_msg,
+    common_utils::{commit_subject, parse_commit_msg},
     internal::{branch::Branch, head::Head, tag},
     utils::{
         client_storage::ClientStorage,
@@ -28,7 +28,9 @@ use crate::{
         object_ext::TreeExt,
         output::{OutputConfig, emit_json_data},
         pager::Pager,
-        path, util,
+        path,
+        text::short_object_id,
+        util,
     },
 };
 
@@ -518,9 +520,8 @@ async fn validate_commit_file(rev: &str, file_path: &str) -> CliResult<()> {
 fn display_commit_info(output: &mut String, commit: &Commit, args: &ShowArgs) {
     if args.oneline {
         // Oneline format prints the short hash and the first subject line.
-        let short_hash = &commit.id.to_string()[..7];
-        let (msg, _) = parse_commit_msg(&commit.message);
-        let first_line = msg.lines().next().unwrap_or("");
+        let short_hash = short_object_id(&commit.id);
+        let first_line = commit_subject(&commit.message);
         output.push_str(&format!("{} {}\n", short_hash.yellow(), first_line));
     } else {
         // Full format matches the default `show` header layout.
@@ -687,7 +688,7 @@ async fn collect_commit_output(
 
     Ok(ShowOutput::Commit(ShowCommitData {
         hash: commit.id.to_string(),
-        short_hash: commit.id.to_string()[..7].to_string(),
+        short_hash: short_object_id(&commit.id),
         author_name: commit.author.name.trim().to_string(),
         author_email: commit.author.email.trim().to_string(),
         author_date: format_timestamp(commit.author.timestamp as i64),

@@ -18,7 +18,7 @@ use serde::Serialize;
 
 use crate::{
     command::load_object,
-    common_utils::parse_commit_msg,
+    common_utils::commit_subject,
     internal::{
         branch::{self, Branch},
         db::get_db_conn_instance,
@@ -952,14 +952,7 @@ fn map_commit_base_error(error: util::CommitBaseError) -> ResetError {
 fn get_commit_summary(commit_id: &ObjectHash) -> Result<String, ResetError> {
     let commit: Commit = load_object(commit_id)
         .map_err(|e| object_load_error("commit", commit_id.to_string(), e.to_string()))?;
-
-    let first_line = parse_commit_msg(&commit.message)
-        .0
-        .lines()
-        .next()
-        .unwrap_or("")
-        .to_string();
-    Ok(first_line)
+    Ok(commit_subject(&commit.message).to_string())
 }
 
 fn tracked_paths_from_index() -> Result<HashSet<PathBuf>, ResetError> {

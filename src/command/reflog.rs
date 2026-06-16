@@ -28,6 +28,7 @@ use crate::{
         error::{CliError, CliResult, StableErrorCode},
         output::{OutputConfig, emit_json_data},
         pager::Pager,
+        text::short_display_hash,
     },
 };
 
@@ -356,7 +357,7 @@ fn build_reflog_entry(
         ref_name: log.ref_name.clone(),
         old_oid: log.old_oid.clone(),
         new_oid: log.new_oid.clone(),
-        short_new_oid: short_oid(&log.new_oid),
+        short_new_oid: short_display_hash(&log.new_oid).to_string(),
         timestamp: log.timestamp,
         datetime: format_datetime_checked(log.timestamp)?,
         committer: ReflogIdentityOutput {
@@ -739,10 +740,6 @@ fn format_datetime_checked(timestamp: i64) -> CliResult<String> {
 
     let git_format = "%a %b %d %H:%M:%S %Y %z";
     Ok(local.format(git_format).to_string())
-}
-
-fn short_oid(oid: &str) -> String {
-    oid.chars().take(7).collect()
 }
 
 /// Synchronous wrapper for generating diff output
