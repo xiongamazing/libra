@@ -2336,9 +2336,14 @@ async fn handle_list(
                 for e in &entries {
                     let origin = e.origin.as_deref().unwrap_or("?");
                     let val = e.value.as_deref().unwrap_or("");
-                    println!("  {:<8} {} = {}  (encrypted)", origin, e.key, val);
+                    let enc_label = if e.encrypted.unwrap_or(false) {
+                        "encrypted"
+                    } else {
+                        "plaintext"
+                    };
+                    println!("  {:<8} {} = {}  ({})", origin, e.key, val, enc_label);
                 }
-                println!("\n{} encrypted entries", entries.len());
+                println!("\n{} entries", entries.len());
                 println!("\nNext steps:");
                 println!("  - add:     libra config set vault.env.<ENV_VAR_NAME>");
                 println!("  - remove:  libra config unset vault.env.<name>");

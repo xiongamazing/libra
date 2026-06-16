@@ -123,6 +123,7 @@ pulldown-cmark = "0.13.3"
 unicode-width = "0.2.2"
 libvault = { version = "0.2.2", features = ["storage_sqlite"] }
 base64 = "0.22.1"
+subtle = "2.6"
 
 [target.'cfg(unix)'.dependencies] # only on Unix
 libfuse-fs = "0.1.13"

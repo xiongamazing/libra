@@ -24,6 +24,7 @@ use axum::{
 };
 use futures_util::stream::{self, StreamExt};
 use serde::Serialize;
+use subtle::ConstantTimeEq;
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::{BroadcastStream, errors::BroadcastStreamRecvError};
 use uuid::Uuid;
@@ -130,10 +131,17 @@ fn build_router(state: WebAppState) -> Router {
 
 fn api_router() -> Router<WebAppState> {
     Router::new()
-        .route("/health", get(|| async { "ok" }))
+        .route("/health", get(health_handler))
         .route("/repo", get(repo_info_handler))
         .route("/repo/status", get(repo_status_handler))
         .nest("/code", code_router())
+}
+
+async fn health_handler(
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
+) -> Result<&'static str, WebApiError> {
+    ensure_loopback_api_request(remote_addr)?;
+    Ok("ok")
 }
 
 fn code_router() -> Router<WebAppState> {
@@ -1003,7 +1011,7 @@ fn ensure_automation_control_token(
         ));
     };
 
-    if actual != expected.as_ref() {
+    if actual.as_bytes().ct_ne(expected.as_bytes()).into() {
         return Err(WebApiError::forbidden(
             "INVALID_CONTROL_TOKEN",
             "X-Libra-Control-Token does not match this Libra Code session",
