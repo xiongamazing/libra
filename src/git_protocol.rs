@@ -122,3 +122,138 @@ pub fn add_pkt_line_string(pkt_line_stream: &mut BytesMut, buf_str: String) {
     pkt_line_stream.put(Bytes::from(format!("{:04x}", buf_str_length)));
     pkt_line_stream.put(buf_str.as_bytes());
 }
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use bytes::{Bytes, BytesMut};
+
+    use super::*;
+
+    // ── ServiceType Display ──────────────────────────────────────────
+
+    #[test]
+    fn service_type_display_upload_pack() {
+        assert_eq!(ServiceType::UploadPack.to_string(), "git-upload-pack");
+    }
+
+    #[test]
+    fn service_type_display_receive_pack() {
+        assert_eq!(ServiceType::ReceivePack.to_string(), "git-receive-pack");
+    }
+
+    // ── ServiceType FromStr ──────────────────────────────────────────
+
+    #[test]
+    fn service_type_from_str_upload_pack() {
+        assert_eq!(
+            ServiceType::from_str("git-upload-pack").unwrap(),
+            ServiceType::UploadPack,
+        );
+    }
+
+    #[test]
+    fn service_type_from_str_receive_pack() {
+        assert_eq!(
+            ServiceType::from_str("git-receive-pack").unwrap(),
+            ServiceType::ReceivePack,
+        );
+    }
+
+    #[test]
+    fn service_type_from_str_rejects_unknown() {
+        assert!(ServiceType::from_str("git-unknown-pack").is_err());
+    }
+
+    #[test]
+    fn service_type_from_str_is_case_sensitive() {
+        assert!(ServiceType::from_str("Git-Upload-Pack").is_err());
+    }
+
+    #[test]
+    fn service_type_display_roundtrips_through_from_str() {
+        for svc in [ServiceType::UploadPack, ServiceType::ReceivePack] {
+            let wire = svc.to_string();
+            assert_eq!(ServiceType::from_str(&wire).unwrap(), svc);
+        }
+    }
+
+    // ── PKT_LINE_END_MARKER ──────────────────────────────────────────
+
+    #[test]
+    fn pkt_line_end_marker_is_flush() {
+        assert_eq!(PKT_LINE_END_MARKER, b"0000");
+    }
+
+    // ── read_pkt_line ────────────────────────────────────────────────
+
+    #[test]
+    fn read_pkt_line_empty_input_returns_zero() {
+        let mut buf = Bytes::new();
+        let (len, payload) = read_pkt_line(&mut buf);
+        assert_eq!(len, 0);
+        assert!(payload.is_empty());
+    }
+
+    #[test]
+    fn read_pkt_line_flush_marker_returns_zero() {
+        let mut buf = Bytes::from_static(b"0000");
+        let (len, payload) = read_pkt_line(&mut buf);
+        assert_eq!(len, 0);
+        assert!(payload.is_empty());
+        assert!(buf.is_empty(), "flush marker bytes should be consumed");
+    }
+
+    #[test]
+    fn read_pkt_line_reads_simple_payload() {
+        // "0008" means total length 8 => payload is 4 bytes: "data"
+        let mut buf = Bytes::from_static(b"0008data");
+        let (len, payload) = read_pkt_line(&mut buf);
+        assert_eq!(len, 8);
+        assert_eq!(payload.as_ref(), b"data");
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn read_pkt_line_leaves_remainder_intact() {
+        // Two frames back-to-back: "0007abc" (len=7, payload="abc") + "0005x" (len=5, payload="x")
+        let mut buf = Bytes::from_static(b"0007abc0005x");
+        let (len1, p1) = read_pkt_line(&mut buf);
+        assert_eq!(len1, 7);
+        assert_eq!(p1.as_ref(), b"abc");
+        let (len2, p2) = read_pkt_line(&mut buf);
+        assert_eq!(len2, 5);
+        assert_eq!(p2.as_ref(), b"x");
+        assert!(buf.is_empty());
+    }
+
+    // ── add_pkt_line_string ──────────────────────────────────────────
+
+    #[test]
+    fn add_pkt_line_string_produces_valid_frame() {
+        let mut stream = BytesMut::new();
+        add_pkt_line_string(&mut stream, "hello".to_string());
+        // "hello" is 5 bytes, total length = 5 + 4 = 9 => header "0009"
+        assert_eq!(&stream[..4], b"0009");
+        assert_eq!(&stream[4..], b"hello");
+    }
+
+    #[test]
+    fn add_pkt_line_string_empty_payload() {
+        let mut stream = BytesMut::new();
+        add_pkt_line_string(&mut stream, String::new());
+        // empty payload, total length = 0 + 4 = 4 => header "0004"
+        assert_eq!(&stream[..], b"0004");
+    }
+
+    #[test]
+    fn write_then_read_roundtrip() {
+        let mut stream = BytesMut::new();
+        add_pkt_line_string(&mut stream, "capability\n".to_string());
+        let mut bytes = stream.freeze();
+        let (len, payload) = read_pkt_line(&mut bytes);
+        assert_eq!(len, 15); // 11 + 4
+        assert_eq!(payload.as_ref(), b"capability\n");
+    }
+}

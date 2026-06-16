@@ -101,3 +101,98 @@ pub fn untracked_overwrite_path(untracked: &[PathBuf], new_index: &Index) -> Opt
 pub fn paths_conflict(left: &Path, right: &Path) -> bool {
     left == right || left.starts_with(right) || right.starts_with(left)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use git_internal::{hash::ObjectHash, internal::index::Index};
+
+    use super::*;
+
+    // ── paths_conflict ───────────────────────────────────────────────
+
+    #[test]
+    fn paths_conflict_identical() {
+        assert!(paths_conflict(Path::new("foo"), Path::new("foo")));
+    }
+
+    #[test]
+    fn paths_conflict_parent_child() {
+        assert!(paths_conflict(Path::new("foo"), Path::new("foo/bar")));
+        assert!(paths_conflict(Path::new("foo/bar"), Path::new("foo")));
+    }
+
+    #[test]
+    fn paths_conflict_deep_nesting() {
+        assert!(paths_conflict(Path::new("a/b"), Path::new("a/b/c/d"),));
+    }
+
+    #[test]
+    fn paths_conflict_unrelated() {
+        assert!(!paths_conflict(Path::new("foo"), Path::new("bar")));
+        assert!(!paths_conflict(Path::new("src/a"), Path::new("src/b")));
+    }
+
+    #[test]
+    fn paths_conflict_similar_prefix_not_ancestor() {
+        // "foobar" is not a child of "foo" — there is no path separator
+        assert!(!paths_conflict(Path::new("foo"), Path::new("foobar"),));
+    }
+
+    #[test]
+    fn paths_conflict_root_path() {
+        assert!(paths_conflict(Path::new(""), Path::new("")));
+    }
+
+    // ── index_has_any_stage ──────────────────────────────────────────
+
+    #[test]
+    fn index_has_any_stage_finds_stage_zero() {
+        let mut index = Index::new();
+        let hash = ObjectHash::new(b"test");
+        index.add(git_internal::internal::index::IndexEntry::new_from_blob(
+            "src/main.rs".to_string(),
+            hash,
+            0,
+        ));
+        assert!(index_has_any_stage(&index, "src/main.rs"));
+    }
+
+    #[test]
+    fn index_has_any_stage_returns_false_for_absent_path() {
+        let index = Index::new();
+        assert!(!index_has_any_stage(&index, "no/such/file.rs"));
+    }
+
+    // ── untracked_overwrite_path ─────────────────────────────────────
+
+    #[test]
+    fn untracked_overwrite_detects_exact_match() {
+        let mut new_index = Index::new();
+        let hash = ObjectHash::new(b"data");
+        new_index.add(git_internal::internal::index::IndexEntry::new_from_blob(
+            "readme.md".to_string(),
+            hash,
+            0,
+        ));
+
+        let untracked = vec![PathBuf::from("readme.md")];
+        let conflict = untracked_overwrite_path(&untracked, &new_index);
+        assert_eq!(conflict, Some(PathBuf::from("readme.md")));
+    }
+
+    #[test]
+    fn untracked_overwrite_returns_none_when_no_conflict() {
+        let mut new_index = Index::new();
+        let hash = ObjectHash::new(b"data");
+        new_index.add(git_internal::internal::index::IndexEntry::new_from_blob(
+            "src/lib.rs".to_string(),
+            hash,
+            0,
+        ));
+
+        let untracked = vec![PathBuf::from("other_file.txt")];
+        assert!(untracked_overwrite_path(&untracked, &new_index).is_none());
+    }
+}
