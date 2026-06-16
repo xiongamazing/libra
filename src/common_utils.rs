@@ -71,6 +71,15 @@ pub fn parse_commit_msg(msg_gpg: &str) -> (&str, Option<&str>) {
     }
 }
 
+/// Extract the subject (first line) from a stored commit message.
+///
+/// Strips any embedded `gpgsig` header via [`parse_commit_msg`] before
+/// returning the first line, so callers never see signature preamble.
+/// Returns `""` when the message body is empty.
+pub fn commit_subject(message: &str) -> &str {
+    parse_commit_msg(message).0.lines().next().unwrap_or("")
+}
+
 /// Check whether the first line of `msg` matches the Conventional Commits 1.0 grammar.
 ///
 /// Functional scope:
@@ -215,6 +224,17 @@ mod tests {
                 "expected `{ok}` to be a valid conventional-commit subject",
             );
         }
+    }
+
+    /// `commit_subject` returns the first line of the message body,
+    /// stripping any gpgsig preamble, and returns `""` for empty input.
+    #[test]
+    fn commit_subject_extracts_first_line() {
+        assert_eq!(commit_subject("hello\nsecond line"), "hello");
+        assert_eq!(commit_subject("  single"), "single");
+        assert_eq!(commit_subject(""), "");
+        // With a leading newline (format_commit_msg unsigned output):
+        assert_eq!(commit_subject("\nactual subject"), "actual subject");
     }
 
     /// Rejects subjects that break the grammar: empty, no `: `

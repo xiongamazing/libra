@@ -24,7 +24,7 @@ use serde::Serialize;
 use crate::{
     cli_error,
     command::{load_object, merge_base, save_object, status},
-    common_utils::parse_commit_msg,
+    common_utils::commit_subject,
     internal::{
         branch::Branch,
         db::get_db_conn_instance,
@@ -37,7 +37,9 @@ use crate::{
         ignore::IgnorePolicy,
         object_ext::{BlobExt, TreeExt},
         output::{OutputConfig, emit_json_data},
-        path, util, worktree,
+        path,
+        text::{short_display_hash, short_object_id},
+        util, worktree,
     },
 };
 
@@ -835,7 +837,7 @@ fn render_rebase_output(result: &RebaseOutput, output: &OutputConfig) -> CliResu
         let skipped_commit = result
             .skipped_commit
             .as_deref()
-            .map(short_id)
+            .map(|s| short_display_hash(s).to_string())
             .unwrap_or_else(|| "unknown".to_string());
         if let Some(subject) = result.skipped_subject.as_deref() {
             println!("Skipped: {skipped_commit} {subject}");
@@ -845,7 +847,11 @@ fn render_rebase_output(result: &RebaseOutput, output: &OutputConfig) -> CliResu
     }
 
     for applied in &result.applied_commits {
-        println!("Applied: {} {}", short_id(&applied.commit), applied.subject);
+        println!(
+            "Applied: {} {}",
+            short_display_hash(&applied.commit),
+            applied.subject
+        );
     }
 
     if matches!(result.action.as_str(), "continue" | "skip") && result.status == "completed" {
@@ -853,7 +859,7 @@ fn render_rebase_output(result: &RebaseOutput, output: &OutputConfig) -> CliResu
         println!(
             "Successfully rebased branch '{}' onto '{}'.",
             result.branch,
-            short_id(onto)
+            short_display_hash(onto)
         );
     }
     Ok(())
@@ -881,7 +887,10 @@ fn render_rebase_start_output(result: &RebaseOutput) {
         }
         _ => {
             if let Some(common_ancestor) = result.common_ancestor.as_deref() {
-                println!("Found common ancestor: {}", short_id(common_ancestor));
+                println!(
+                    "Found common ancestor: {}",
+                    short_display_hash(common_ancestor)
+                );
             }
             if let Some(replay_count) = result.replay_count {
                 println!(
@@ -890,12 +899,16 @@ fn render_rebase_start_output(result: &RebaseOutput) {
                 );
             }
             for applied in &result.applied_commits {
-                println!("Applied: {} {}", short_id(&applied.commit), applied.subject);
+                println!(
+                    "Applied: {} {}",
+                    short_display_hash(&applied.commit),
+                    applied.subject
+                );
             }
             println!(
                 "Successfully rebased branch '{}' onto '{}'.",
                 result.branch,
-                short_id(&result.commit)
+                short_display_hash(&result.commit)
             );
         }
     }
@@ -909,26 +922,9 @@ async fn ensure_rebase_in_progress() -> Result<(), RebaseError> {
     }
 }
 
-fn short_id(value: &str) -> String {
-    value.chars().take(7).collect()
-}
-
-fn short_object_id(value: &ObjectHash) -> String {
-    short_id(&value.to_string())
-}
-
-fn commit_subject_from_message(message: &str) -> String {
-    parse_commit_msg(message)
-        .0
-        .lines()
-        .next()
-        .unwrap_or("")
-        .to_string()
-}
-
 fn commit_subject_lossy(commit_id: &ObjectHash, emit_human: bool) -> String {
     match load_object::<Commit>(commit_id) {
-        Ok(commit) => commit_subject_from_message(&commit.message),
+        Ok(commit) => commit_subject(&commit.message).to_string(),
         Err(e) => {
             if emit_human {
                 cli_error!(
@@ -1475,7 +1471,7 @@ async fn run_rebase_continue() -> Result<RebaseOutput, RebaseError> {
                 commit: stopped_sha.to_string(),
                 detail: e.to_string(),
             })?;
-        let subject = commit_subject_from_message(&original_commit.message);
+        let subject = commit_subject(&original_commit.message).to_string();
 
         let new_commit = Commit::from_tree_id(
             new_tree_id,
@@ -1650,7 +1646,7 @@ async fn run_rebase_skip() -> Result<RebaseOutput, RebaseError> {
         .or_else(|| state.todo.front().cloned())
         .ok_or(RebaseError::NoCommitToSkip)?;
     let skipped_subject = match load_object::<Commit>(&skipped_sha) {
-        Ok(commit) => Some(commit_subject_from_message(&commit.message)),
+        Ok(commit) => Some(commit_subject(&commit.message).to_string()),
         Err(_) => None,
     };
 

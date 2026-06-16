@@ -44,7 +44,9 @@ use crate::{
         error::{CliError, CliResult, StableErrorCode},
         object_ext::TreeExt,
         output::{OutputConfig, emit_json_data},
-        path, util, worktree,
+        path,
+        text::short_object_id,
+        util, worktree,
     },
 };
 
@@ -3134,11 +3136,6 @@ fn index_mode_to_tree_item_mode(mode: u32) -> Result<TreeItemMode, PullMergeErro
             "unsupported index mode {other:o} while creating merge tree"
         ))),
     }
-}
-
-fn short_object_id(object_id: &ObjectHash) -> String {
-    let object_id = object_id.to_string();
-    object_id.chars().take(7).collect()
 }
 
 async fn merge_commit_message(

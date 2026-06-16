@@ -42,6 +42,7 @@ use crate::{
         load_object, restore,
         status::{changes_to_be_committed_safe, changes_to_be_staged_with_policy},
     },
+    common_utils::commit_subject,
     internal::{
         branch::{Branch, BranchStoreError},
         config::ConfigKv,
@@ -53,6 +54,7 @@ use crate::{
         ignore::IgnorePolicy,
         object_ext::TreeExt,
         output::{OutputConfig, emit_json_data},
+        text::short_display_hash,
         util,
     },
 };
@@ -565,7 +567,7 @@ fn render_bisect_output(result: &BisectOutput, output: &OutputConfig) -> CliResu
             remaining,
             ..
         } => {
-            println!("Marked {} as {mark}", short_hash_str(commit));
+            println!("Marked {} as {mark}", short_display_hash(commit));
             render_bisect_progress(status, current, first_bad, subject, *remaining);
         }
         BisectOutput::Skip {
@@ -575,7 +577,7 @@ fn render_bisect_output(result: &BisectOutput, output: &OutputConfig) -> CliResu
             remaining,
             ..
         } => {
-            println!("Skipped {}", short_hash_str(commit));
+            println!("Skipped {}", short_display_hash(commit));
             render_bisect_progress(status, current, &None, &None, *remaining);
         }
         BisectOutput::Reset {
@@ -589,15 +591,15 @@ fn render_bisect_output(result: &BisectOutput, output: &OutputConfig) -> CliResu
                 if let Some(branch) = branch {
                     println!(
                         "HEAD is now at {} (on branch {})",
-                        short_hash_str(commit),
+                        short_display_hash(commit),
                         branch
                     );
                 } else {
-                    println!("HEAD is now at {}", short_hash_str(commit));
+                    println!("HEAD is now at {}", short_display_hash(commit));
                 }
                 println!(
                     "Bisect session ended, HEAD restored to {}",
-                    short_hash_str(commit)
+                    short_display_hash(commit)
                 );
             }
         }
@@ -612,20 +614,23 @@ fn render_bisect_output(result: &BisectOutput, output: &OutputConfig) -> CliResu
             println!("Bisect log:");
             println!(
                 "  Bad: {}",
-                bad.as_deref().map(short_hash_str).unwrap_or("not set")
+                bad.as_deref().map(short_display_hash).unwrap_or("not set")
             );
             let good = if good.is_empty() {
                 String::new()
             } else {
                 good.iter()
-                    .map(|hash| short_hash_str(hash).to_string())
+                    .map(|hash| short_display_hash(hash).to_string())
                     .collect::<Vec<_>>()
                     .join(", ")
             };
             println!("  Good: {good}");
             println!(
                 "  Current: {}",
-                current.as_deref().map(short_hash_str).unwrap_or("not set")
+                current
+                    .as_deref()
+                    .map(short_display_hash)
+                    .unwrap_or("not set")
             );
             println!("  Skipped: {} commits", skipped.len());
             println!("  Steps remaining: {steps:?}");
@@ -640,17 +645,17 @@ fn render_bisect_output(result: &BisectOutput, output: &OutputConfig) -> CliResu
         } => {
             let good = good
                 .first()
-                .map(|hash| short_hash_str(hash).to_string())
+                .map(|hash| short_display_hash(hash).to_string())
                 .unwrap_or_else(|| "(unset)".to_string());
             let bad = bad
                 .as_deref()
-                .map(short_hash_str)
+                .map(short_display_hash)
                 .unwrap_or("(unset)")
                 .to_string();
             println!("Bisecting between {good} (good) and {bad} (bad)");
             println!(
                 "HEAD: {}",
-                head.as_deref().map(short_hash_str).unwrap_or("(none)")
+                head.as_deref().map(short_display_hash).unwrap_or("(none)")
             );
             println!("Remaining: {remaining} candidate(s)");
             if skipped.is_empty() {
@@ -658,7 +663,7 @@ fn render_bisect_output(result: &BisectOutput, output: &OutputConfig) -> CliResu
             } else {
                 let skipped = skipped
                     .iter()
-                    .map(|hash| short_hash_str(hash).to_string())
+                    .map(|hash| short_display_hash(hash).to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
                 println!("Skipped: {skipped}");
@@ -673,7 +678,7 @@ fn render_bisect_output(result: &BisectOutput, output: &OutputConfig) -> CliResu
             if let Some(first_bad) = first_bad {
                 println!(
                     "Converged: first bad commit is {}",
-                    short_hash_str(first_bad)
+                    short_display_hash(first_bad)
                 );
             }
             println!("{steps} steps, {} skipped", skipped.len());
@@ -695,7 +700,7 @@ fn render_bisect_progress(
         "waiting_for_bad" => println!("Status: waiting for bad commit"),
         "testing" => {
             if let Some(current) = current {
-                println!("HEAD is now at {}", short_hash_str(current));
+                println!("HEAD is now at {}", short_display_hash(current));
             }
             if let Some(remaining) = remaining {
                 println!("Bisecting: {remaining} revisions left to test after this");
@@ -703,7 +708,7 @@ fn render_bisect_progress(
         }
         "converged" => {
             if let Some(first_bad) = first_bad {
-                println!("{} is the first bad commit", short_hash_str(first_bad));
+                println!("{} is the first bad commit", short_display_hash(first_bad));
             }
             if let Some(subject) = subject {
                 println!("{subject}");
@@ -712,10 +717,6 @@ fn render_bisect_progress(
         "all_skipped" => println!("Cannot narrow down further - all commits have been skipped"),
         _ => {}
     }
-}
-
-fn short_hash_str(hash: &str) -> &str {
-    &hash[..hash.len().min(7)]
 }
 
 fn hash_to_string_opt(hash: Option<ObjectHash>) -> Option<String> {
@@ -921,7 +922,7 @@ async fn run_bisect_start(bad: Option<String>, good: Option<String>) -> CliResul
                 let bad_commit = state.bad.ok_or_else(|| CliError::fatal("No bad commit"))?;
                 let commit = load_object::<Commit>(&bad_commit)
                     .map_err(|e| CliError::fatal(format!("Failed to load commit: {e}")))?;
-                let subject = commit.message.lines().next().unwrap_or("");
+                let subject = commit_subject(&commit.message);
                 // Move HEAD to the culprit commit, mark completed but keep state for reset
                 checkout_to_commit(bad_commit).await?;
                 state.current = Some(bad_commit);
@@ -1046,7 +1047,7 @@ async fn run_bisect_bad(rev: Option<String>) -> CliResult<BisectOutput> {
                 .ok_or_else(|| CliError::fatal("No bad commit set"))?;
             let commit = load_object::<Commit>(&bad)
                 .map_err(|e| CliError::fatal(format!("Failed to load commit: {e}")))?;
-            let subject = commit.message.lines().next().unwrap_or("");
+            let subject = commit_subject(&commit.message);
             // Move HEAD to the culprit commit, mark completed but keep state for reset
             checkout_to_commit(bad).await?;
             state.current = Some(bad);
@@ -1150,7 +1151,7 @@ async fn run_bisect_good(rev: Option<String>) -> CliResult<BisectOutput> {
                 .ok_or_else(|| CliError::fatal("No bad commit set"))?;
             let commit = load_object::<Commit>(&bad)
                 .map_err(|e| CliError::fatal(format!("Failed to load commit: {e}")))?;
-            let subject = commit.message.lines().next().unwrap_or("");
+            let subject = commit_subject(&commit.message);
             // Move HEAD to the culprit commit, mark completed but keep state for reset
             checkout_to_commit(bad).await?;
             state.current = Some(bad);
@@ -1481,7 +1482,7 @@ async fn run_bisect_run(cmd: Vec<String>) -> CliResult<BisectOutput> {
 
         let head_short = Head::current_commit()
             .await
-            .map(|h| h.to_string()[..7].to_string())
+            .map(|h| short_display_hash(&h.to_string()).to_string())
             .unwrap_or_else(|| "(no HEAD)".to_string());
 
         let status = Command::new(executable).args(args).status().map_err(|e| {

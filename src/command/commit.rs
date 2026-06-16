@@ -28,7 +28,7 @@ use serde::Serialize;
 
 use crate::{
     command::{load_object, save_object_to_storage, status},
-    common_utils::{check_conventional_commits_message, format_commit_msg},
+    common_utils::{check_conventional_commits_message, commit_subject, format_commit_msg},
     internal::{
         ai::automation::{VCS_EVENT_POST_COMMIT, dispatch_current_repo_vcs_event_to_history},
         branch::Branch,
@@ -42,7 +42,9 @@ use crate::{
         lfs,
         object_ext::BlobExt,
         output::{OutputConfig, emit_json_data},
-        path, util,
+        path,
+        text::short_object_id,
+        util,
     },
 };
 
@@ -405,10 +407,6 @@ async fn create_commit_signatures(
     Ok((author, committer, committer_identity))
 }
 
-fn first_message_line(message: &str) -> String {
-    message.lines().next().unwrap_or("").trim().to_string()
-}
-
 /// Pure execution entry point. Receives `&OutputConfig` only for hook I/O
 /// control (human mode: inherit, JSON/machine mode: piped). Does NOT render
 /// output — returns [`CommitOutput`] on success for the caller to render.
@@ -711,8 +709,8 @@ async fn build_commit_output(
     };
 
     let commit_str = commit.id.to_string();
-    let short_id: String = commit_str.chars().take(7).collect();
-    let subject = first_message_line(user_message);
+    let short_id = short_object_id(&commit.id);
+    let subject = commit_subject(user_message).trim().to_string();
 
     CommitOutput {
         head: head_label,

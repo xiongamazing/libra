@@ -36,6 +36,7 @@ use crate::{
         object_ext::TreeExt,
         output::{OutputConfig, emit_json_data},
         pager::Pager,
+        text::short_object_id,
         util,
     },
 };
@@ -724,7 +725,7 @@ async fn run_log(args: &LogArgs) -> CliResult<LogOutput> {
         let subject = message_lines.next().unwrap_or("").to_string();
         let body = message_lines.collect::<Vec<_>>().join("\n");
         let hash = commit.id.to_string();
-        let short_hash = hash.get(..7).unwrap_or(&hash).to_string();
+        let short_hash = short_object_id(&commit.id);
 
         commits.push(LogCommitEntry {
             hash,
