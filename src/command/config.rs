@@ -2860,14 +2860,26 @@ async fn handle_generate_ssh_key(
 
     // Store public key plaintext in config_kv
     let pubkey_key = format!("vault.ssh.{remote}.pubkey");
-    let _ = ConfigKv::set(&pubkey_key, &public_key, false).await;
+    ConfigKv::set(&pubkey_key, &public_key, false)
+        .await
+        .map_err(|e| {
+            CliError::from_legacy_string(format!(
+                "error: failed to store SSH public key in config: {e}"
+            ))
+        })?;
 
     // Store private key encrypted in config_kv (vault-backed, no persistent file)
     let privkey_key = format!("vault.ssh.{remote}.privkey");
     let encrypted_privkey = encrypt_token(&unseal_key, private_key.as_bytes()).map_err(|e| {
         CliError::from_legacy_string(format!("error: failed to encrypt SSH private key: {e}"))
     })?;
-    let _ = ConfigKv::set(&privkey_key, &hex::encode(encrypted_privkey), true).await;
+    ConfigKv::set(&privkey_key, &hex::encode(encrypted_privkey), true)
+        .await
+        .map_err(|e| {
+            CliError::from_legacy_string(format!(
+                "error: failed to store encrypted SSH private key in config: {e}"
+            ))
+        })?;
 
     if output.is_json() {
         emit_json_data(
@@ -2958,11 +2970,23 @@ async fn handle_generate_gpg_key(
     } else {
         format!("vault.gpg.{usage}.pubkey")
     };
-    let _ = ConfigKv::set(&pubkey_config_key, &public_key, false).await;
+    ConfigKv::set(&pubkey_config_key, &public_key, false)
+        .await
+        .map_err(|e| {
+            CliError::from_legacy_string(format!(
+                "error: failed to store GPG public key in config: {e}"
+            ))
+        })?;
 
     // Only enable vault.signing for signing usage
     if is_signing {
-        let _ = ConfigKv::set("vault.signing", "true", false).await;
+        ConfigKv::set("vault.signing", "true", false)
+            .await
+            .map_err(|e| {
+                CliError::from_legacy_string(format!(
+                    "error: failed to enable vault signing in config: {e}"
+                ))
+            })?;
     }
 
     if output.is_json() {

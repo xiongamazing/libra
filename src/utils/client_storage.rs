@@ -1101,7 +1101,9 @@ fn get_or_create_repo_id_for_prefix() -> Option<String> {
             .unwrap_or(true);
         if needs_init {
             let new_id = Uuid::new_v4().to_string();
-            let _ = ConfigKv::set("libra.repoid", &new_id, false).await;
+            if let Err(e) = ConfigKv::set("libra.repoid", &new_id, false).await {
+                tracing::warn!(error = %e, "failed to persist auto-generated repo ID");
+            }
             repo_id = Some(new_id);
         }
         let _ = tx.send(repo_id);

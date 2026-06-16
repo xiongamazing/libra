@@ -19,7 +19,7 @@ use git_internal::{
     hash::{ObjectHash, get_hash_kind},
 };
 use object_store::{aws::AmazonS3Builder, local::LocalFileSystem};
-use sea_orm::{DatabaseConnection, DatabaseTransaction};
+use sea_orm::{DatabaseConnection, DatabaseTransaction, DbErr};
 use serde::Serialize;
 use url::Url;
 
@@ -1988,8 +1988,20 @@ async fn configure_cloud_publish_checkout(
             })?;
 
         let merge_ref = format!("refs/heads/{branch_name}");
-        let _ = ConfigKv::set(&format!("branch.{branch_name}.merge"), &merge_ref, false).await;
-        let _ = ConfigKv::set(&format!("branch.{branch_name}.remote"), "origin", false).await;
+        ConfigKv::set(&format!("branch.{branch_name}.merge"), &merge_ref, false)
+            .await
+            .map_err(|error| CloneError::CloudPublishCheckoutSetupFailed {
+                domain: source.clone_domain.clone(),
+                target: site_target_label(source, &restore_plan.site),
+                message: format!("failed to set branch.{branch_name}.merge config: {error}"),
+            })?;
+        ConfigKv::set(&format!("branch.{branch_name}.remote"), "origin", false)
+            .await
+            .map_err(|error| CloneError::CloudPublishCheckoutSetupFailed {
+                domain: source.clone_domain.clone(),
+                target: site_target_label(source, &restore_plan.site),
+                message: format!("failed to set branch.{branch_name}.remote config: {error}"),
+            })?;
     } else {
         Head::update_result_with_conn(&db, Head::Detached(selected_commit), None)
             .await
@@ -2000,30 +2012,35 @@ async fn configure_cloud_publish_checkout(
             })?;
     }
 
-    let _ = ConfigKv::set("remote.origin.url", remote_url, false).await;
-    let _ = ConfigKv::set("remote.origin.type", "libra+cloud", false).await;
-    let _ = ConfigKv::set("cloud.origin.clone_domain", &source.clone_domain, false).await;
-    let _ = ConfigKv::set("cloud.origin.site_id", &restore_plan.site.site_id, false).await;
-    let _ = ConfigKv::set("cloud.origin.repo_id", &restore_plan.site.repo_id, false).await;
-    let _ = ConfigKv::set(
-        "cloud.origin.repository_name",
-        &restore_plan.repository.name,
-        false,
-    )
-    .await;
-    let _ = ConfigKv::set("cloud.origin.slug", &restore_plan.site.slug, false).await;
-    let _ = ConfigKv::set(
-        "cloud.origin.revision_status",
-        &restore_plan.revision.status,
-        false,
-    )
-    .await;
-    let _ = ConfigKv::set(
-        "cloud.origin.revision_oid",
-        &restore_plan.checkout.revision_oid,
-        false,
-    )
-    .await;
+    let config_pairs: &[(&str, &str)] = &[
+        ("remote.origin.url", remote_url),
+        ("remote.origin.type", "libra+cloud"),
+        ("cloud.origin.clone_domain", &source.clone_domain),
+        ("cloud.origin.site_id", &restore_plan.site.site_id),
+        ("cloud.origin.repo_id", &restore_plan.site.repo_id),
+        (
+            "cloud.origin.repository_name",
+            &restore_plan.repository.name,
+        ),
+        ("cloud.origin.slug", &restore_plan.site.slug),
+        (
+            "cloud.origin.revision_status",
+            &restore_plan.revision.status,
+        ),
+        (
+            "cloud.origin.revision_oid",
+            &restore_plan.checkout.revision_oid,
+        ),
+    ];
+    for (key, value) in config_pairs {
+        ConfigKv::set(key, value, false).await.map_err(|error| {
+            CloneError::CloudPublishCheckoutSetupFailed {
+                domain: source.clone_domain.clone(),
+                target: site_target_label(source, &restore_plan.site),
+                message: format!("failed to set {key} config: {error}"),
+            }
+        })?;
+    }
 
     Ok(())
 }
@@ -2922,27 +2939,34 @@ pub(crate) async fn setup_repository(
                     Head::update_with_conn(txn, Head::Branch(branch_name.to_owned()), None).await;
 
                     let merge_ref = format!("refs/heads/{}", branch_name);
-                    let _ = ConfigKv::set_with_conn(
+                    ConfigKv::set_with_conn(
                         txn,
                         &format!("branch.{}.merge", branch_name),
                         &merge_ref,
                         false,
                     )
-                    .await;
-                    let _ = ConfigKv::set_with_conn(
+                    .await
+                    .map_err(|e| {
+                        DbErr::Custom(format!("failed to set branch merge config: {e}"))
+                    })?;
+                    ConfigKv::set_with_conn(
                         txn,
                         &format!("branch.{}.remote", branch_name),
                         &remote_config.name,
                         false,
                     )
-                    .await;
-                    let _ = ConfigKv::set_with_conn(
+                    .await
+                    .map_err(|e| {
+                        DbErr::Custom(format!("failed to set branch remote config: {e}"))
+                    })?;
+                    ConfigKv::set_with_conn(
                         txn,
                         &format!("remote.{}.url", remote_config.name),
                         &remote_config.url,
                         false,
                     )
-                    .await;
+                    .await
+                    .map_err(|e| DbErr::Custom(format!("failed to set remote URL config: {e}")))?;
                     Ok(())
                 })
             },
@@ -2968,22 +2992,32 @@ pub(crate) async fn setup_repository(
             branch_name: Some(branch_name_for_result),
         })
     } else {
-        let _ = ConfigKv::set(
+        ConfigKv::set(
             &format!("remote.{}.url", remote_config.name),
             &remote_config.url,
             false,
         )
-        .await;
+        .await
+        .map_err(|e| CloneError::SetupFailed {
+            message: format!("failed to set remote URL config: {e}"),
+        })?;
 
         let default_branch = "main";
         let merge_ref = format!("refs/heads/{}", default_branch);
-        let _ = ConfigKv::set(&format!("branch.{default_branch}.merge"), &merge_ref, false).await;
-        let _ = ConfigKv::set(
+        ConfigKv::set(&format!("branch.{default_branch}.merge"), &merge_ref, false)
+            .await
+            .map_err(|e| CloneError::SetupFailed {
+                message: format!("failed to set branch merge config: {e}"),
+            })?;
+        ConfigKv::set(
             &format!("branch.{default_branch}.remote"),
             &remote_config.name,
             false,
         )
-        .await;
+        .await
+        .map_err(|e| CloneError::SetupFailed {
+            message: format!("failed to set branch remote config: {e}"),
+        })?;
 
         Ok(SetupResult { branch_name: None })
     }

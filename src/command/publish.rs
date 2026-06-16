@@ -1614,7 +1614,13 @@ async fn run_publish_sync_selected_refs_with_sink_and_ai_planner(
             warnings: &warnings,
             error_message: Some(error.message()),
         })?;
-        let _ = sink.upsert_sync_run(failed).await;
+        if let Err(upsert_err) = sink.upsert_sync_run(failed).await {
+            tracing::warn!(
+                error = %upsert_err,
+                sync_run_id = %sync_run_id,
+                "failed to record sync run failure status"
+            );
+        }
         return Err(error);
     }
 
